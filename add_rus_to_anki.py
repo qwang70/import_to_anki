@@ -29,6 +29,7 @@ DEFAULT_NOTE = {
             "checkAllModels": False
         }
     },
+    "audio": []
 }
 
 def getNoteJson(input_word, note):
@@ -64,31 +65,38 @@ def getNoteJson(input_word, note):
     note["fields"]["Genitive Suffi"] = form
     return note
 
-def getForvoPronun(input_word, note):
-    if not note["fields"]["Word"]:
-        note["fields"]["Word"] = input_word
-    word = note["fields"]["Word"]
+def getForvoPronun(word, note):
     url = "https://apifree.forvo.com/action/word-pronunciations/format/json/word/{}/id_lang_speak/138/order/rate-desc/key/{}/".format(word, forvo_api)
     response = requests.get(url)
     if (response.status_code != 200):
         print("Forvo request failed for word", word, url)
         return
     data = response.json()
-    items = data["items"][:5]
-    if not len(items):
+    if not len(data["items"]):
         print("No audio for word", word)
         return
-    for idx, item in enumerate(items):
-        mp3_link = item["pathmp3"]
-        print(mp3_link)
-        if idx == 0:
-            note["audio"] = [{
-                "url": mp3_link,
-                "filename": "forvo_qiwen_{}.mp3".format(word),
-                "fields": [
-                    "Audio"
-                ]
-            }]
+    item = data["items"][0]
+    mp3_link = item["pathmp3"]
+    #print(mp3_link)
+    note["audio"].append({
+        "url": mp3_link,
+        "filename": "forvo_qiwen_{}.mp3".format(word),
+        "fields": [
+            "Audio"
+        ]
+    })
+    return note
+
+def getForvoPronuns(input_words, note):
+    empty_result = True
+    if not note["fields"]["Word"]:
+        note["fields"]["Word"] = ", ".join(input_words)
+    for word in input_words:
+        if getForvoPronun(word, note):
+            empty_result = False
+
+    if empty_result:
+        return
     return note
 
 
@@ -97,11 +105,16 @@ parser.add_argument('words', type=str, nargs='+')
 parser.add_argument('--no-dict', action='store_true', help='do not pull definition, only pull audio')
 args = parser.parse_args()
 
-for word in args.words:
-    note = copy.deepcopy(DEFAULT_NOTE)
-    if not args.no_dict:
-        note = getNoteJson(word, note)
-    if note:
-        note = getForvoPronun(word, note)
-        result = ankiconnect.invoke('guiAddCards', note=note)
-
+note = copy.deepcopy(DEFAULT_NOTE)
+if len(args.words) == 1:
+    for word in args.words:
+        if not args.no_dict:
+            note = getNoteJson(word, note)
+        if note:
+            if not note["fields"]["Word"]:
+                note["fields"]["Word"] = word
+            note = getForvoPronun(note["fields"]["Word"], note)
+            result = ankiconnect.invoke('guiAddCards', note=note)
+elif len(args.words) > 1 and args.no_dict:
+    note = getForvoPronuns(args.words, note)
+    result = ankiconnect.invoke('guiAddCards', note=note)
